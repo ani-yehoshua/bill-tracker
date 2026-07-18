@@ -33,14 +33,14 @@
     },
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/dJoshware/bill-tracker.git"
+        "url": "git+https://github.com/ani-yehoshua/bill-tracker.git"
     },
     "keywords": [],
     "author": "",
     "license": "ISC",
     "type": "module",
     "bugs": {
-        "url": "https://github.com/dJoshware/bill-tracker/issues"
+        "url": "https://github.com/ani-yehoshua/bill-tracker/issues"
     },
-    "homepage": "https://github.com/dJoshware/bill-tracker#readme"
+    "homepage": "https://github.com/ani-yehoshua/bill-tracker#readme"
 }
