@@ -28,17 +28,17 @@ create trigger push_subscriptions_updated_at
   before update on push_subscriptions
   for each row execute function update_updated_at();
 
--- RLS: only the service role can read (for the cron job)
--- The anon key can only insert/delete its own subscription
+-- RLS: all access goes through API routes using the service role key
+-- (see app/api/push/*), so the anon key gets no access at all.
 alter table push_subscriptions enable row level security;
 
-create policy "Anyone can subscribe"
+create policy "Service role can insert subscriptions"
   on push_subscriptions for insert
-  with check (true);
+  with check (auth.role() = 'service_role');
 
-create policy "Anyone can unsubscribe by endpoint"
+create policy "Service role can delete subscriptions"
   on push_subscriptions for delete
-  using (true);
+  using (auth.role() = 'service_role');
 
 create policy "Service role can read all"
   on push_subscriptions for select
@@ -60,11 +60,11 @@ create trigger bills_updated_at
 
 alter table bills enable row level security;
 
-create policy "Anyone can upsert bills by endpoint"
-  on bills for insert with check (true);
+create policy "Service role can insert bills"
+  on bills for insert with check (auth.role() = 'service_role');
 
-create policy "Anyone can update bills by endpoint"
-  on bills for update using (true);
+create policy "Service role can update bills"
+  on bills for update using (auth.role() = 'service_role');
 
 create policy "Service role can read all bills"
   on bills for select using (auth.role() = 'service_role');
