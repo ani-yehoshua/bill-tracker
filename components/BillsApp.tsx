@@ -813,7 +813,15 @@ export default function BillsApp({ householdId }: BillsAppProps) {
                         handleAddExpense(ringSheet.id, amount, description)
                     }
                     onDeleteExpense={handleDeleteExpense}
-                    onClose={() => setRingSheet(null)}
+                    onClose={() => {
+                        setRingSheet(null);
+                        // Focusing an input inside the fixed-position sheet
+                        // nudges mobile browsers to scroll the page to keep
+                        // it visible above the keyboard; that scroll sticks
+                        // around after the sheet closes. Rings live at the
+                        // top, so just snap back there.
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                    }}
                 />
             )}
             {showIncome && (
@@ -823,7 +831,10 @@ export default function BillsApp({ householdId }: BillsAppProps) {
                     currentMonthKey={monthKey}
                     onAdd={handleAddPaycheck}
                     onDelete={handleDeletePaycheck}
-                    onClose={() => setShowIncome(false)}
+                    onClose={() => {
+                        setShowIncome(false);
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                    }}
                 />
             )}
 
