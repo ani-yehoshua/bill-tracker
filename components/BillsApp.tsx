@@ -1,14 +1,21 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useBills, usePaid } from "@/hooks/useBills";
+import { useBudgetRings } from "@/hooks/useBudgetRings";
+import { useExpenses } from "@/hooks/useExpenses";
+import { usePaychecks } from "@/hooks/usePaychecks";
 import BillCard from "@/components/BillCard";
 import BillForm from "@/components/BillForm";
 import NotificationPanel from "@/components/NotificationPanel";
 import HouseholdPanel from "@/components/HouseholdPanel";
 import ImportPrompt from "@/components/ImportPrompt";
-import type { Bill } from "@/lib/types";
+import RingCard from "@/components/RingCard";
+import RingSheet from "@/components/RingSheet";
+import IncomeSheet from "@/components/IncomeSheet";
+import type { Bill, BudgetRing } from "@/lib/types";
 import { formatCurrency, getMonthKey, billVisibleInMonth } from "@/lib/types";
+import { generateUuid } from "@/lib/uuid";
 import { registerServiceWorker, getPermissionStatus } from "@/lib/notifications";
 import {
     checkPendingImport,
@@ -53,17 +60,52 @@ export default function BillsApp({ householdId }: BillsAppProps) {
     const { bills, loaded, addBill, updateBill, deleteBill, refetch } =
         useBills(householdId);
     const { paid, togglePaid } = usePaid(householdId, monthKey);
+    const { rings, addRing, updateRing, removeRing } =
+        useBudgetRings(householdId);
+    const { expenses, addExpense, removeExpense } = useExpenses(
+        householdId,
+        monthKey,
+    );
+    const { paychecks, addPaycheck, removePaycheck } = usePaychecks(
+        householdId,
+        monthKey,
+    );
 
     const [showForm, setShowForm] = useState(false);
     const [editBill, setEditBill] = useState<Bill | null>(null);
     const [showNotif, setShowNotif] = useState(false);
     const [showHousehold, setShowHousehold] = useState(false);
+    const [showIncome, setShowIncome] = useState(false);
+    const [ringSheet, setRingSheet] = useState<BudgetRing | "new" | null>(
+        null,
+    );
     const [pendingImport, setPendingImport] = useState<PendingImport | null>(
         null,
     );
     const [toast, setToast] = useState("");
     const [filterCat, setFilterCat] = useState<string>("all");
     const [sortBy, setSortBy] = useState<"due" | "amount" | "name">("due");
+
+    // Header height drives the controls row's sticky offset below — both
+    // are sticky at once, and the header's height is content-dependent
+    // (progress bar appears/disappears), so a static `top` would let the
+    // controls row scroll in underneath the header instead of below it.
+    const headerRef = useRef<HTMLDivElement>(null);
+    const [headerHeight, setHeaderHeight] = useState(0);
+    useEffect(() => {
+        if (!headerRef.current) return;
+        const el = headerRef.current;
+        const observer = new ResizeObserver(([entry]) =>
+            setHeaderHeight(entry.target.clientHeight),
+        );
+        observer.observe(el);
+        return () => observer.disconnect();
+        // `loaded` is a dependency, not just a guard: the header (and its
+        // ref) don't exist in the DOM until the "Loading…" early return
+        // below stops firing, so this must re-run once that flips to
+        // true — otherwise headerRef.current is null when this effect
+        // first runs and the observer never attaches.
+    }, [loaded]);
 
     // Register SW on mount
     useEffect(() => {
@@ -124,12 +166,98 @@ export default function BillsApp({ householdId }: BillsAppProps) {
         return { total, paidTotal, remaining: total - paidTotal };
     }, [bills, monthKey, paid]);
 
+    // Per-ring spend/save totals for the viewed month
+    const ringTotals = useMemo(() => {
+        const totals = new Map<string, number>();
+        for (const ex of expenses) {
+            if (!ex.ringId) continue;
+            totals.set(ex.ringId, (totals.get(ex.ringId) ?? 0) + ex.amount);
+        }
+        return totals;
+    }, [expenses]);
+
+    const incomeTotal = useMemo(
+        () => paychecks.reduce((s, p) => s + p.amount, 0),
+        [paychecks],
+    );
+    const budgetedTotal = useMemo(
+        () => rings.reduce((s, r) => s + r.targetAmount, 0),
+        [rings],
+    );
+
     const notifStatus =
         typeof window !== "undefined" ? getPermissionStatus() : "default";
 
     const handleEdit = (bill: Bill) => {
         setEditBill(bill);
         setShowForm(true);
+    };
+
+    const handleSaveRing = async (ring: BudgetRing) => {
+        try {
+            if (ringSheet !== "new") {
+                await updateRing(ring.id, ring);
+                showToast("Ring updated ✓");
+            } else {
+                await addRing({ ...ring, sortOrder: rings.length });
+                showToast("Ring created ✓");
+            }
+        } catch {
+            showToast("Couldn't save — try again");
+        }
+    };
+
+    const handleAddExpense = async (
+        ringId: string,
+        amount: number,
+        description?: string,
+    ) => {
+        try {
+            await addExpense({
+                id: generateUuid(),
+                ringId,
+                amount,
+                description,
+                spentOn: new Date().toISOString().slice(0, 10),
+                monthKey,
+            });
+        } catch {
+            showToast("Couldn't add entry — try again");
+        }
+    };
+
+    const handleDeleteExpense = async (id: string) => {
+        try {
+            await removeExpense(id);
+        } catch {
+            showToast("Couldn't remove entry — try again");
+        }
+    };
+
+    const handleRemoveRing = async (id: string) => {
+        try {
+            await removeRing(id);
+            showToast("Ring removed");
+        } catch {
+            showToast("Couldn't remove ring — try again");
+        }
+    };
+
+    const handleAddPaycheck = async (paycheck: Parameters<typeof addPaycheck>[0]) => {
+        try {
+            await addPaycheck(paycheck);
+            showToast("Paycheck added ✓");
+        } catch {
+            showToast("Couldn't save — try again");
+        }
+    };
+
+    const handleDeletePaycheck = async (id: string) => {
+        try {
+            await removePaycheck(id);
+        } catch {
+            showToast("Couldn't remove — try again");
+        }
     };
 
     const handleSave = async (bill: Bill) => {
@@ -169,6 +297,7 @@ export default function BillsApp({ householdId }: BillsAppProps) {
         <div style={{ maxWidth: 480, margin: "0 auto", paddingBottom: 40 }}>
             {/* ── HEADER ── */}
             <div
+                ref={headerRef}
                 style={{
                     background:
                         "linear-gradient(160deg,#1a1d27 0%,#0f1117 100%)",
@@ -379,6 +508,96 @@ export default function BillsApp({ householdId }: BillsAppProps) {
 
             {/* ── CONTENT ── */}
             <div style={{ padding: "20px 16px" }}>
+                {/* Income tile */}
+                <button
+                    onClick={() => setShowIncome(true)}
+                    style={{
+                        width: "100%",
+                        background: "var(--surface)",
+                        border: "1px solid var(--border)",
+                        borderRadius: 12,
+                        padding: "12px 16px",
+                        marginBottom: 14,
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        cursor: "pointer",
+                        fontFamily: "var(--font-dm-sans)",
+                    }}>
+                    <span style={{ fontSize: 13, color: "var(--muted)" }}>
+                        💰 Income this month
+                    </span>
+                    <span
+                        style={{
+                            fontSize: 16,
+                            fontWeight: 600,
+                            color: "var(--success)",
+                        }}>
+                        {formatCurrency(incomeTotal)}
+                    </span>
+                </button>
+
+                {/* Budget rings grid */}
+                <div
+                    style={{
+                        display: "grid",
+                        gridTemplateColumns:
+                            rings.length <= 4 ? "1fr 1fr" : "1fr 1fr 1fr",
+                        gap: 10,
+                        marginBottom: 10,
+                    }}>
+                    {rings.map(ring => (
+                        <RingCard
+                            key={ring.id}
+                            ring={ring}
+                            spent={ringTotals.get(ring.id) ?? 0}
+                            onTap={setRingSheet}
+                        />
+                    ))}
+                    <button
+                        onClick={() => setRingSheet("new")}
+                        style={{
+                            background: "var(--surface)",
+                            border: "1px dashed var(--border)",
+                            borderRadius: 16,
+                            padding: "14px 10px",
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: 6,
+                            cursor: "pointer",
+                            color: "var(--muted)",
+                            fontFamily: "var(--font-dm-sans)",
+                            minHeight: 130,
+                        }}>
+                        <span style={{ fontSize: 24 }}>+</span>
+                        <span style={{ fontSize: 12 }}>Add Ring</span>
+                    </button>
+                </div>
+
+                {/* Allocation summary */}
+                <div
+                    style={{
+                        fontSize: 11,
+                        color: "var(--muted)",
+                        textAlign: "center",
+                        marginBottom: 14,
+                    }}>
+                    Income {formatCurrency(incomeTotal)} · Budgeted{" "}
+                    {formatCurrency(budgetedTotal)} · Unallocated{" "}
+                    <span
+                        style={{
+                            color:
+                                incomeTotal - budgetedTotal < 0
+                                    ? "var(--danger)"
+                                    : "var(--text)",
+                            fontWeight: 600,
+                        }}>
+                        {formatCurrency(incomeTotal - budgetedTotal)}
+                    </span>
+                </div>
+
                 {/* Controls row */}
                 <div
                     style={{
@@ -388,7 +607,7 @@ export default function BillsApp({ householdId }: BillsAppProps) {
                         marginBottom: 14,
                         gap: 8,
                         position: "sticky",
-                        top: 0,
+                        top: headerHeight,
                         background: "var(--bg)",
                         zIndex: 90,
                         paddingTop: 4,
@@ -572,6 +791,39 @@ export default function BillsApp({ householdId }: BillsAppProps) {
                     count={pendingImport.localBills.length}
                     onMerge={handleMergeImport}
                     onDiscard={handleDiscardImport}
+                />
+            )}
+            {ringSheet && (
+                <RingSheet
+                    initial={ringSheet === "new" ? null : ringSheet}
+                    spent={
+                        ringSheet === "new"
+                            ? 0
+                            : ringTotals.get(ringSheet.id) ?? 0
+                    }
+                    expenses={
+                        ringSheet === "new"
+                            ? []
+                            : expenses.filter(ex => ex.ringId === ringSheet.id)
+                    }
+                    onSave={handleSaveRing}
+                    onRemove={handleRemoveRing}
+                    onAddExpense={(amount, description) =>
+                        ringSheet !== "new" &&
+                        handleAddExpense(ringSheet.id, amount, description)
+                    }
+                    onDeleteExpense={handleDeleteExpense}
+                    onClose={() => setRingSheet(null)}
+                />
+            )}
+            {showIncome && (
+                <IncomeSheet
+                    paychecks={paychecks}
+                    total={incomeTotal}
+                    currentMonthKey={monthKey}
+                    onAdd={handleAddPaycheck}
+                    onDelete={handleDeletePaycheck}
+                    onClose={() => setShowIncome(false)}
                 />
             )}
 

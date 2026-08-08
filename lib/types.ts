@@ -158,3 +158,66 @@ export function isDueSoon(
 export const STORAGE_BILLS = 'owed_bills_v3';
 export const STORAGE_PAID_PREFIX = 'owed_paid_';
 export const STORAGE_PUSH_SUB = 'owed_push_sub';
+
+// ─── Budget rings / income (Phase 2) ───────────────────────────────────────────
+
+export type RingKind = 'spend' | 'save';
+
+export interface BudgetRing {
+    id: string;
+    name: string;
+    targetAmount: number;
+    color: string;
+    icon: string;
+    kind: RingKind;
+    sortOrder: number;
+}
+
+export interface Expense {
+    id: string;
+    ringId: string | null;
+    amount: number;
+    description?: string;
+    spentOn: string; // ISO date "YYYY-MM-DD"
+    monthKey: string;
+}
+
+export interface Paycheck {
+    id: string;
+    amount: number;
+    receivedOn: string; // ISO date "YYYY-MM-DD"
+    monthKey: string;
+    source?: string;
+    note?: string;
+}
+
+export const RING_COLOR_PRESETS = [
+    '#7BF0C9',
+    '#B07BF0',
+    '#F0C97B',
+    '#6EC8A0',
+    '#7B9EF0',
+    '#F07B7B',
+    '#C8A96E',
+    '#E8C98E',
+];
+
+export const RING_ICON_PRESETS = [
+    '🛒',
+    '🧴',
+    '⛽',
+    '🏦',
+    '🎮',
+    '📚',
+    '✈️',
+    '🎁',
+    '🍽️',
+    '💳',
+    '🐾',
+    '🎯',
+];
+
+export function ringProgress(ring: BudgetRing, spent: number): number {
+    if (ring.targetAmount <= 0) return 0;
+    return spent / ring.targetAmount;
+}
