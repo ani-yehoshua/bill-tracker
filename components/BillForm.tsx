@@ -8,16 +8,13 @@ import {
     RECURRENCE_OPTIONS,
     MONTH_NAMES,
 } from "@/lib/types";
+import { generateUuid } from "@/lib/uuid";
 
 interface BillFormProps {
     initial?: Bill | null;
     onSave: (bill: Bill) => void;
     onClose: () => void;
     currentMonthKey: string;
-}
-
-function generateId() {
-    return Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
 
 export default function BillForm({
@@ -63,7 +60,7 @@ export default function BillForm({
             return;
         }
         const bill: Bill = {
-            id: initial?.id ?? generateId(),
+            id: initial?.id ?? generateUuid(),
             name: name.trim(),
             amount: parseFloat(amount),
             dueDay: parseInt(dueDay),

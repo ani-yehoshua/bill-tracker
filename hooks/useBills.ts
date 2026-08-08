@@ -1,82 +1,190 @@
 'use client';
 
 import * as React from 'react';
-import type { Bill, PaidRecord } from '@/lib/types';
-import { STORAGE_BILLS, STORAGE_PAID_PREFIX, getMonthKey } from '@/lib/types';
-import { runMigrations } from '@/lib/migrate';
+import type { Bill } from '@/lib/types';
+import { createClient } from '@/lib/supabase/client';
+import {
+    fetchBills,
+    insertBill,
+    updateBillRow,
+    deleteBillRow,
+    fetchPaid,
+    markPaid,
+    markUnpaid,
+} from '@/lib/db/bills';
 
-export function useBills() {
+export function useBills(householdId: string) {
     const [bills, setBills] = React.useState<Bill[]>([]);
     const [loaded, setLoaded] = React.useState(false);
 
-    React.useEffect(() => {
+    const refetch = React.useCallback(async () => {
         try {
-            runMigrations();
-            const raw = localStorage.getItem(STORAGE_BILLS);
-            if (raw) setBills(JSON.parse(raw));
-        } catch {}
-        setLoaded(true);
-    }, []);
+            setBills(await fetchBills(householdId));
+        } catch {
+            // leave previous state — the realtime channel or next mutation
+            // will retry
+        }
+    }, [householdId]);
 
-    const saveBills = React.useCallback((next: Bill[]) => {
-        setBills(next);
-        try {
-            localStorage.setItem(STORAGE_BILLS, JSON.stringify(next));
-        } catch {}
-    }, []);
+    React.useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const rows = await fetchBills(householdId);
+                if (!cancelled) setBills(rows);
+            } finally {
+                if (!cancelled) setLoaded(true);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [householdId]);
+
+    React.useEffect(() => {
+        const supabase = createClient();
+        let debounce: ReturnType<typeof setTimeout>;
+        const channel = supabase
+            .channel(`household:${householdId}:bills`)
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'bills',
+                    filter: `household_id=eq.${householdId}`,
+                },
+                () => {
+                    clearTimeout(debounce);
+                    debounce = setTimeout(refetch, 150);
+                },
+            )
+            .subscribe();
+        return () => {
+            clearTimeout(debounce);
+            supabase.removeChannel(channel);
+        };
+    }, [householdId, refetch]);
 
     const addBill = React.useCallback(
-        (bill: Bill) => saveBills([...bills, bill]),
-        [bills, saveBills],
+        async (bill: Bill) => {
+            setBills(prev => [...prev, bill]);
+            try {
+                await insertBill(bill, householdId);
+            } catch (e) {
+                setBills(prev => prev.filter(b => b.id !== bill.id));
+                throw e;
+            }
+        },
+        [householdId],
     );
 
     const updateBill = React.useCallback(
-        (id: string, updates: Partial<Bill>) =>
-            saveBills(bills.map(b => (b.id === id ? { ...b, ...updates } : b))),
-        [bills, saveBills],
+        async (id: string, updates: Partial<Bill>) => {
+            const prevBills = bills;
+            setBills(prev =>
+                prev.map(b => (b.id === id ? { ...b, ...updates } : b)),
+            );
+            try {
+                await updateBillRow(id, updates, householdId);
+            } catch (e) {
+                setBills(prevBills);
+                throw e;
+            }
+        },
+        [bills, householdId],
     );
 
     const deleteBill = React.useCallback(
-        (id: string) => saveBills(bills.filter(b => b.id !== id)),
-        [bills, saveBills],
+        async (id: string) => {
+            const prevBills = bills;
+            setBills(prev => prev.filter(b => b.id !== id));
+            try {
+                await deleteBillRow(id, householdId);
+            } catch (e) {
+                setBills(prevBills);
+                throw e;
+            }
+        },
+        [bills, householdId],
     );
 
-    return { bills, loaded, addBill, updateBill, deleteBill };
+    return { bills, loaded, addBill, updateBill, deleteBill, refetch };
 }
 
-export function usePaid(monthKey: string) {
-    const [paid, setPaid] = React.useState<PaidRecord>({});
+export function usePaid(householdId: string, monthKey: string) {
+    const [paid, setPaid] = React.useState<Record<string, true>>({});
+
+    const refetch = React.useCallback(async () => {
+        try {
+            setPaid(await fetchPaid(householdId, monthKey));
+        } catch {
+            // leave previous state
+        }
+    }, [householdId, monthKey]);
 
     React.useEffect(() => {
-        try {
-            const raw = localStorage.getItem(STORAGE_PAID_PREFIX + monthKey);
-            if (raw) setPaid(JSON.parse(raw));
-            else setPaid({});
-        } catch {
-            setPaid({});
-        }
-    }, [monthKey]);
+        let cancelled = false;
+        (async () => {
+            const rows = await fetchPaid(householdId, monthKey).catch(
+                () => ({}) as Record<string, true>,
+            );
+            if (!cancelled) setPaid(rows);
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [householdId, monthKey]);
+
+    React.useEffect(() => {
+        const supabase = createClient();
+        let debounce: ReturnType<typeof setTimeout>;
+        const channel = supabase
+            .channel(`household:${householdId}:bill_paid`)
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'bill_paid',
+                    filter: `household_id=eq.${householdId}`,
+                },
+                () => {
+                    clearTimeout(debounce);
+                    debounce = setTimeout(refetch, 150);
+                },
+            )
+            .subscribe();
+        return () => {
+            clearTimeout(debounce);
+            supabase.removeChannel(channel);
+        };
+    }, [householdId, refetch]);
 
     const togglePaid = React.useCallback(
-        (id: string) => {
-            const next = { ...paid };
-            if (next[id]) delete next[id];
-            else next[id] = true;
-            setPaid(next);
+        async (id: string) => {
+            const wasPaid = !!paid[id];
+            setPaid(prev => {
+                const next = { ...prev };
+                if (wasPaid) delete next[id];
+                else next[id] = true;
+                return next;
+            });
             try {
-                localStorage.setItem(
-                    STORAGE_PAID_PREFIX + monthKey,
-                    JSON.stringify(next),
-                );
-            } catch {}
+                if (wasPaid) await markUnpaid(id, monthKey);
+                else await markPaid(id, householdId, monthKey);
+            } catch (e) {
+                setPaid(prev => {
+                    const next = { ...prev };
+                    if (wasPaid) next[id] = true;
+                    else delete next[id];
+                    return next;
+                });
+                throw e;
+            }
         },
-        [paid, monthKey],
+        [paid, householdId, monthKey],
     );
 
     return { paid, togglePaid };
-}
-
-export function getCurrentMonthKey() {
-    const d = new Date();
-    return getMonthKey(d.getFullYear(), d.getMonth());
 }

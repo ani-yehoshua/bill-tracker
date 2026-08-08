@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as webpush from 'web-push';
-import { createServiceClient } from '@/lib/supabase';
+import { createServiceClient } from '@/lib/supabase/service';
 import type { Bill } from '@/lib/types';
+import { getMonthKey } from '@/lib/types';
 
 webpush.setVapidDetails(
     'mailto:owed-app@notifications.com',
@@ -9,11 +10,9 @@ webpush.setVapidDetails(
     process.env.VAPID_PRIVATE_KEY!,
 );
 
-function getBillsDueForReminder(bills: Bill[]): Bill[] {
-    const today = new Date();
-    const todayYear = today.getFullYear();
-    const todayMonth = today.getMonth();
-    const todayDate = today.getDate();
+function getBillsDueForReminder(bills: Bill[], monthKey: string): Bill[] {
+    const [todayYear, todayMonth] = monthKey.split('-').map(Number);
+    const todayDate = new Date().getDate();
 
     return bills.filter(bill => {
         if (bill.recurrence === 'once') {
@@ -30,30 +29,45 @@ function getBillsDueForReminder(bills: Bill[]): Bill[] {
     });
 }
 
+/** 'YYYY-MM-DD' in a timezone utcOffsetMinutes away from UTC (getTimezoneOffset sign convention). */
+function localDateString(utcOffsetMinutes: number): string {
+    const local = new Date(Date.now() - utcOffsetMinutes * 60_000);
+    return local.toISOString().slice(0, 10);
+}
+
+/** Same convention: month/day derived from the device's local date, not UTC. */
+function localMonthKey(utcOffsetMinutes: number): string {
+    const local = new Date(Date.now() - utcOffsetMinutes * 60_000);
+    return getMonthKey(local.getUTCFullYear(), local.getUTCMonth());
+}
+
 /**
  * Converts the user's preferred local time to UTC using their stored
  * timezone offset, then fires on the first cron run at or after that
- * UTC hour. Guards against double-sending with last_sent_date.
+ * UTC hour. Guards against double-sending with last_sent_local_date.
  */
 function shouldSendNow(
     preferredTime: string,
     utcOffsetMinutes: number,
-    lastSentDate: string | null,
+    lastSentLocalDate: string | null,
 ): boolean {
     const [prefHour, prefMinute] = preferredTime.split(':').map(Number);
     const now = new Date();
-    const todayUTC = now.toISOString().slice(0, 10); // "YYYY-MM-DD"
 
-    // Already sent today — don't send again
-    if (lastSentDate === todayUTC) return false;
+    // Already sent today (in the device's own local date) — don't resend.
+    if (lastSentLocalDate === localDateString(utcOffsetMinutes)) return false;
 
-    // Convert preferred local time to UTC
-    // getTimezoneOffset() is positive for zones behind UTC (e.g. Central = 300/360)
+    // Convert preferred local time to UTC. getTimezoneOffset() is positive
+    // for zones behind UTC (e.g. Central = 300/360) and NEGATIVE for zones
+    // ahead of UTC — a plain `% 24` on a negative value stays negative in
+    // JS, which previously made `now.getUTCHours() >= prefUTCHour` always
+    // true for those zones (fired at 00:00 UTC regardless of preference).
     const prefLocalMinutes = prefHour * 60 + prefMinute;
-    const prefUTCMinutes = prefLocalMinutes + utcOffsetMinutes;
-    const prefUTCHour = Math.floor(prefUTCMinutes / 60) % 24;
+    const prefUTCMinutesRaw = prefLocalMinutes + utcOffsetMinutes;
+    const prefUTCMinutes = ((prefUTCMinutesRaw % 1440) + 1440) % 1440;
+    const prefUTCHour = Math.floor(prefUTCMinutes / 60);
 
-    // Fire on first cron run at or after the preffered UTC hour
+    // Fire on the first cron run at or after the preferred UTC hour.
     return now.getUTCHours() >= prefUTCHour;
 }
 
@@ -67,7 +81,8 @@ export async function GET(req: NextRequest) {
 
     const { data: subscriptions, error: subError } = await supabase
         .from('push_subscriptions')
-        .select('*');
+        .select('*')
+        .not('household_id', 'is', null);
 
     if (subError) {
         console.error('Failed to fetch subscriptions:', subError);
@@ -78,14 +93,52 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ sent: 0, message: 'No subscriptions' });
     }
 
+    const householdIds = [
+        ...new Set(subscriptions.map(s => s.household_id!)),
+    ];
+
     const { data: billRows, error: billError } = await supabase
         .from('bills')
-        .select('endpoint, data, notify_time, utc_offset_minutes, last_sent_date');
+        .select('*')
+        .in('household_id', householdIds)
+        .is('archived_at', null);
 
     if (billError) {
         console.error('Failed to fetch bills:', billError);
         return NextResponse.json({ error: 'DB error' }, { status: 500 });
     }
+
+    const billsByHousehold = new Map<string, Bill[]>();
+    for (const row of billRows ?? []) {
+        const bill: Bill = {
+            id: row.id,
+            name: row.name,
+            amount: Number(row.amount),
+            dueDay: row.due_day,
+            dueMonth: row.due_month ?? undefined,
+            category: row.category as Bill['category'],
+            recurrence: row.recurrence,
+            monthKey: row.month_key ?? undefined,
+            notes: row.notes ?? undefined,
+            notifyDaysBefore: row.notify_days_before,
+            color: row.color ?? undefined,
+        };
+        const list = billsByHousehold.get(row.household_id) ?? [];
+        list.push(bill);
+        billsByHousehold.set(row.household_id, list);
+    }
+
+    // Bills already marked paid this month, per household — don't nag about those.
+    // (Per-subscription month keys, using each device's own UTC offset, are
+    // computed in the loop below.)
+    const { data: paidRows } = await supabase
+        .from('bill_paid')
+        .select('bill_id, household_id, month_key')
+        .in('household_id', householdIds);
+
+    const paidSet = new Set(
+        (paidRows ?? []).map(r => `${r.household_id}:${r.month_key}:${r.bill_id}`),
+    );
 
     let sent = 0;
     let failed = 0;
@@ -93,22 +146,24 @@ export async function GET(req: NextRequest) {
     const expiredEndpoints: string[] = [];
     const sentEndpoints: string[] = [];
 
-    for (const row of billRows ?? []) {
-        const notifyTime: string = row.notify_time ?? '09:00';
-        const utcOffsetMinutes: number = row.utc_offset_minutes ?? 0;
-        const lastSentDate: string | null = row.last_sent_date ?? null;
+    for (const sub of subscriptions) {
+        const notifyTime = sub.notify_time ?? '09:00';
+        const utcOffsetMinutes = sub.utc_offset_minutes ?? 0;
+        const lastSentLocalDate = sub.last_sent_local_date ?? null;
+        const householdId = sub.household_id;
+        if (!householdId) continue;
 
-        if (!shouldSendNow(notifyTime, utcOffsetMinutes, lastSentDate)) {
+        if (!shouldSendNow(notifyTime, utcOffsetMinutes, lastSentLocalDate)) {
             skipped++;
             continue;
         }
 
-        const bills: Bill[] = row.data ?? [];
-        const billsDue = getBillsDueForReminder(bills);
+        const monthKey = localMonthKey(utcOffsetMinutes);
+        const bills = billsByHousehold.get(householdId) ?? [];
+        const billsDue = getBillsDueForReminder(bills, monthKey).filter(
+            bill => !paidSet.has(`${householdId}:${monthKey}:${bill.id}`),
+        );
         if (billsDue.length === 0) continue;
-
-        const sub = subscriptions.find(s => s.endpoint === row.endpoint);
-        if (!sub) continue;
 
         const pushSubscription = {
             endpoint: sub.endpoint,
@@ -133,9 +188,8 @@ export async function GET(req: NextRequest) {
             try {
                 await webpush.sendNotification(pushSubscription, payload);
                 sent++;
-                // Track that we sent for this endpoint today
-                if (!sentEndpoints.includes(row.endpoint)) {
-                    sentEndpoints.push(row.endpoint);
+                if (!sentEndpoints.includes(sub.endpoint)) {
+                    sentEndpoints.push(sub.endpoint);
                 }
             } catch (err: unknown) {
                 if (
@@ -153,13 +207,14 @@ export async function GET(req: NextRequest) {
         }
     }
 
-    // Mark today's date on all rows that successfully sent
-    const todayUTC = new Date().toISOString().slice(0, 10);
-    if (sentEndpoints.length > 0) {
+    // Mark today's (device-local) date on subscriptions that successfully sent.
+    for (const endpoint of sentEndpoints) {
+        const sub = subscriptions.find(s => s.endpoint === endpoint);
+        if (!sub) continue;
         await supabase
-            .from('bills')
-            .update({ last_sent_date: todayUTC })
-            .in('endpoint', sentEndpoints);
+            .from('push_subscriptions')
+            .update({ last_sent_local_date: localDateString(sub.utc_offset_minutes ?? 0) })
+            .eq('endpoint', endpoint);
     }
 
     // Remove expired subscriptions

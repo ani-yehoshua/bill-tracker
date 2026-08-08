@@ -10,6 +10,7 @@ import {
     getExistingSubscription,
     getSavedNotifyTime,
     saveNotifyTime,
+    savePushPrefs,
     formatTime12h,
     DEFAULT_NOTIFY_TIME,
 } from "@/lib/notifications";
@@ -62,6 +63,7 @@ export default function NotificationPanel({
             if (sub) {
                 setSubscribed(true);
                 setPermission("granted");
+                await savePushPrefs();
             } else {
                 setPermission(getPermissionStatus());
             }
@@ -90,6 +92,7 @@ export default function NotificationPanel({
     const handleTimeChange = (value: string) => {
         setNotifyTime(value);
         saveNotifyTime(value);
+        savePushPrefs();
         setTimeSaved(true);
         setTimeout(() => setTimeSaved(false), 2000);
     };

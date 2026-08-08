@@ -1,7 +1,5 @@
 'use client';
 
-import type { Bill } from './types';
-
 export const STORAGE_NOTIFY_TIME = 'owed_notify_time';
 export const DEFAULT_NOTIFY_TIME = '09:00';
 
@@ -103,26 +101,29 @@ export async function getExistingSubscription(): Promise<PushSubscription | null
     return reg.pushManager.getSubscription();
 }
 
-// ─── Bill Sync ────────────────────────────────────────────────────────────────
+// ─── Push preferences ─────────────────────────────────────────────────────────
 
-/** Call this whenever bills change so the cron job has the latest schedule */
-export async function syncBillsToServer(bills: Bill[]): Promise<void> {
+/**
+ * Syncs this device's reminder-time preference to the server. Bills
+ * themselves live in the `bills` table and the cron reads them directly, so
+ * this only needs to carry timing — not the bill list.
+ */
+export async function savePushPrefs(): Promise<void> {
     const sub = await getExistingSubscription();
     if (!sub) return; // not subscribed to push, nothing to sync
 
     try {
-        await fetch('/api/push/sync-bills', {
+        await fetch('/api/push/prefs', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 endpoint: sub.endpoint,
-                bills,
                 notifyTime: getSavedNotifyTime(),
                 utcOffsetMinutes: new Date().getTimezoneOffset(),
             }),
         });
     } catch (e) {
-        console.error('Bill sync failed:', e);
+        console.error('Push prefs sync failed:', e);
     }
 }
 
