@@ -7,7 +7,7 @@ together — built as an installable PWA.
 ## Features
 
 - **Shared households** — sign in with an emailed one-time code (no
-  passwords), then join a partner's household with a short invite code;
+  passwords), then join an existing household with a short invite code;
   bills, budgets, and income sync live between everyone in it
 - **Bills** — monthly, yearly, or one-time bills with categories, due-date
   tracking, and per-month paid state

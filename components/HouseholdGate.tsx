@@ -9,7 +9,7 @@ import {
 
 const ERROR_COPY: Record<string, string> = {
     invalid_code:
-        "We don't recognize that code — double-check with your partner.",
+        "We don't recognize that code — double-check it with whoever sent it, or it may have expired.",
     already_in_household: "You're already in a household.",
     not_authenticated: 'Please sign in again.',
     unknown: 'Something went wrong — try again.',
@@ -88,8 +88,7 @@ export default function HouseholdGate() {
                     marginBottom: 32,
                     textAlign: 'center',
                 }}>
-                Start fresh, or join the household your partner already
-                created.
+                Start fresh, or join a household someone already created.
             </p>
 
             {mode === 'choose' ? (
@@ -135,7 +134,7 @@ export default function HouseholdGate() {
                     <input
                         value={code}
                         onChange={e => setCode(formatCodeInput(e.target.value))}
-                        placeholder='OWED-4F2K'
+                        placeholder='XXXX-XXXX'
                         maxLength={9}
                         autoCapitalize='characters'
                         autoFocus

@@ -52,7 +52,7 @@ function getViewMonth(offset: number) {
     return { year: y, month };
 }
 
-export default function BillsApp({ householdId }: BillsAppProps) {
+export default function BillsApp({ userId, householdId }: BillsAppProps) {
     const [monthOffset, setMonthOffset] = useState(0);
     const { year, month } = getViewMonth(monthOffset);
     const monthKey = getMonthKey(year, month);
@@ -584,18 +584,40 @@ export default function BillsApp({ householdId }: BillsAppProps) {
                         textAlign: "center",
                         marginBottom: 14,
                     }}>
-                    Income {formatCurrency(incomeTotal)} · Budgeted{" "}
-                    {formatCurrency(budgetedTotal)} · Unallocated{" "}
-                    <span
-                        style={{
-                            color:
-                                incomeTotal - budgetedTotal < 0
-                                    ? "var(--danger)"
-                                    : "var(--text)",
-                            fontWeight: 600,
-                        }}>
-                        {formatCurrency(incomeTotal - budgetedTotal)}
-                    </span>
+                    {budgetedTotal === 0 ? (
+                        <span style={{ color: "var(--accent)" }}>
+                            Set a budget on your rings to compare against
+                            income
+                        </span>
+                    ) : incomeTotal >= budgetedTotal ? (
+                        <>
+                            Income {formatCurrency(incomeTotal)} · Budgeted{" "}
+                            {formatCurrency(budgetedTotal)} · Unallocated{" "}
+                            <span
+                                style={{
+                                    color:
+                                        incomeTotal - budgetedTotal > 0
+                                            ? "var(--success)"
+                                            : "var(--text)",
+                                    fontWeight: 600,
+                                }}>
+                                {formatCurrency(incomeTotal - budgetedTotal)}
+                            </span>
+                        </>
+                    ) : (
+                        <>
+                            Income {formatCurrency(incomeTotal)} · Budgeted{" "}
+                            {formatCurrency(budgetedTotal)} · Still need{" "}
+                            <span
+                                style={{
+                                    color: "var(--accent)",
+                                    fontWeight: 600,
+                                }}>
+                                {formatCurrency(budgetedTotal - incomeTotal)}
+                            </span>{" "}
+                            more
+                        </>
+                    )}
                 </div>
 
                 {/* Controls row */}
@@ -781,6 +803,7 @@ export default function BillsApp({ householdId }: BillsAppProps) {
             )}
             {showHousehold && (
                 <HouseholdPanel
+                    userId={userId}
                     householdId={householdId}
                     onClose={() => setShowHousehold(false)}
                     showToast={showToast}

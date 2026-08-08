@@ -15,6 +15,9 @@ export interface HouseholdMember {
 export function useHousehold(householdId: string) {
     const [name, setName] = React.useState('');
     const [inviteCode, setInviteCode] = React.useState<string | null>(null);
+    const [inviteCodeExpiresAt, setInviteCodeExpiresAt] = React.useState<
+        string | null
+    >(null);
     const [members, setMembers] = React.useState<HouseholdMember[]>([]);
     const [loading, setLoading] = React.useState(true);
 
@@ -23,18 +26,20 @@ export function useHousehold(householdId: string) {
         const [{ data: household }, { data: memberRows }] = await Promise.all([
             supabase
                 .from('households')
-                .select('name, invite_code')
+                .select('name, invite_code, invite_code_expires_at')
                 .eq('id', householdId)
                 .single(),
             supabase
                 .from('household_members')
                 .select('user_id, role')
-                .eq('household_id', householdId),
+                .eq('household_id', householdId)
+                .order('joined_at'),
         ]);
 
         if (household) {
             setName(household.name);
             setInviteCode(household.invite_code);
+            setInviteCodeExpiresAt(household.invite_code_expires_at);
         }
 
         if (memberRows && memberRows.length > 0) {
@@ -72,8 +77,45 @@ export function useHousehold(householdId: string) {
     const rotate = React.useCallback(async () => {
         const code = await rotateInviteCode();
         setInviteCode(code);
+        // rotateInviteCode() only returns the new code; refetch to pick up
+        // the new invite_code_expires_at that came with it.
+        await refetch();
         return code;
-    }, []);
+    }, [refetch]);
 
-    return { name, inviteCode, members, loading, refetch, rotate };
+    const rename = React.useCallback(
+        async (newName: string) => {
+            const supabase = createClient();
+            const { error } = await supabase
+                .from('households')
+                .update({ name: newName })
+                .eq('id', householdId);
+            if (error) throw error;
+            setName(newName);
+        },
+        [householdId],
+    );
+
+    const closeInvites = React.useCallback(async () => {
+        const supabase = createClient();
+        const { error } = await supabase
+            .from('households')
+            .update({ invite_code: null, invite_code_expires_at: null })
+            .eq('id', householdId);
+        if (error) throw error;
+        setInviteCode(null);
+        setInviteCodeExpiresAt(null);
+    }, [householdId]);
+
+    return {
+        name,
+        inviteCode,
+        inviteCodeExpiresAt,
+        members,
+        loading,
+        refetch,
+        rotate,
+        rename,
+        closeInvites,
+    };
 }

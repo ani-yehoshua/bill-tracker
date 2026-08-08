@@ -33,6 +33,7 @@ export interface Database {
                     id: string;
                     name: string;
                     invite_code: string | null;
+                    invite_code_expires_at: string | null;
                     created_by: string | null;
                     currency: string;
                     created_at: string;

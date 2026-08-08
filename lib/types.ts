@@ -217,6 +217,21 @@ export const RING_ICON_PRESETS = [
     '🎯',
 ];
 
+export const AVATAR_EMOJI_PRESETS = [
+    '🙂',
+    '😎',
+    '🥳',
+    '🤓',
+    '🦊',
+    '🐶',
+    '🐱',
+    '🐼',
+    '🦁',
+    '🐸',
+    '🌈',
+    '⭐',
+];
+
 export function ringProgress(ring: BudgetRing, spent: number): number {
     if (ring.targetAmount <= 0) return 0;
     return spent / ring.targetAmount;
