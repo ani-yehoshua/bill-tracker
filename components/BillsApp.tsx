@@ -540,6 +540,16 @@ export default function BillsApp({ userId, householdId }: BillsAppProps) {
                 {/* Budget rings grid */}
                 <div
                     style={{
+                        fontSize: 11,
+                        color: "var(--muted)",
+                        marginBottom: 8,
+                        letterSpacing: "0.04em",
+                        textTransform: "uppercase",
+                    }}>
+                    Goals
+                </div>
+                <div
+                    style={{
                         display: "grid",
                         gridTemplateColumns:
                             rings.length <= 4 ? "1fr 1fr" : "1fr 1fr 1fr",
