@@ -17,6 +17,11 @@ function daysUntil(iso: string) {
     return Math.max(1, Math.ceil(ms / 86_400_000));
 }
 
+function isExpired(iso: string | null) {
+    if (!iso) return false;
+    return new Date(iso).getTime() <= Date.now();
+}
+
 export default function HouseholdPanel({
     userId,
     householdId,
@@ -127,6 +132,13 @@ export default function HouseholdPanel({
         !!self &&
         (displayNameInput.trim() !== (self.displayName ?? '') ||
             avatarEmoji !== self.avatarEmoji);
+
+    // A code can still be sitting in `invite_code` after it's expired —
+    // nothing nulls it out automatically, only an explicit rotate/close
+    // does. Treat an expired code the same as no code at all, so this
+    // never shows a dead code as if it's still shareable.
+    const codeExpired = isExpired(inviteCodeExpiresAt);
+    const codeActive = !!inviteCode && !codeExpired;
 
     return (
         <div
@@ -279,7 +291,7 @@ export default function HouseholdPanel({
                         marginBottom: 12,
                         textAlign: 'center',
                     }}>
-                    {inviteCode ? (
+                    {codeActive ? (
                         <>
                             <button
                                 onClick={handleCopy}
@@ -332,7 +344,9 @@ export default function HouseholdPanel({
                                     fontWeight: 600,
                                     color: 'var(--text)',
                                 }}>
-                                Invites are closed
+                                {codeExpired
+                                    ? 'Invite code expired'
+                                    : 'Invites are closed'}
                             </div>
                             <div
                                 style={{
