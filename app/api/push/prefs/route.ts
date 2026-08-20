@@ -22,16 +22,28 @@ export async function POST(req: NextRequest) {
         }
 
         const service = createServiceClient();
-        const { error } = await service
+        const { data, error } = await service
             .from('push_subscriptions')
             .update({
                 notify_time: notifyTime ?? '09:00',
                 utc_offset_minutes: utcOffsetMinutes ?? 0,
             })
             .eq('endpoint', endpoint)
-            .eq('user_id', userData.user.id);
+            .eq('user_id', userData.user.id)
+            .select('endpoint');
 
         if (error) throw error;
+
+        // An UPDATE matching zero rows isn't a PostgREST error — without this
+        // check, a stale/mismatched endpoint (e.g. after the browser silently
+        // rotates its push subscription) reports "saved" while the device
+        // keeps its previous notify_time/utc_offset_minutes indefinitely.
+        if (!data || data.length === 0) {
+            return NextResponse.json(
+                { error: 'Subscription not found' },
+                { status: 404 },
+            );
+        }
 
         return NextResponse.json({ ok: true });
     } catch (err) {

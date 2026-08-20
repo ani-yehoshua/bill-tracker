@@ -49,6 +49,7 @@ export default function NotificationPanel({
     const [notifyTime, setNotifyTime] =
         React.useState<string>(DEFAULT_NOTIFY_TIME);
     const [timeSaved, setTimeSaved] = React.useState(false);
+    const [timeSaveError, setTimeSaveError] = React.useState(false);
 
     React.useEffect(() => {
         registerServiceWorker().then(reg => setSwReady(!!reg));
@@ -89,12 +90,17 @@ export default function NotificationPanel({
         setTimeout(() => setTestSent(false), 3000);
     };
 
-    const handleTimeChange = (value: string) => {
+    const handleTimeChange = async (value: string) => {
         setNotifyTime(value);
         saveNotifyTime(value);
-        savePushPrefs();
-        setTimeSaved(true);
-        setTimeout(() => setTimeSaved(false), 2000);
+        setTimeSaveError(false);
+        const ok = await savePushPrefs();
+        if (ok) {
+            setTimeSaved(true);
+            setTimeout(() => setTimeSaved(false), 2000);
+        } else {
+            setTimeSaveError(true);
+        }
     };
 
     const statusColor =
@@ -253,6 +259,15 @@ export default function NotificationPanel({
                                     marginLeft: 6,
                                 }}>
                                 ✓ saved
+                            </span>
+                        )}
+                        {timeSaveError && (
+                            <span
+                                style={{
+                                    color: "var(--danger)",
+                                    marginLeft: 6,
+                                }}>
+                                Couldn&apos;t save — try again
                             </span>
                         )}
                     </div>

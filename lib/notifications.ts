@@ -103,27 +103,43 @@ export async function getExistingSubscription(): Promise<PushSubscription | null
 
 // ─── Push preferences ─────────────────────────────────────────────────────────
 
+async function postPrefs(endpoint: string): Promise<Response> {
+    return fetch('/api/push/prefs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            endpoint,
+            notifyTime: getSavedNotifyTime(),
+            utcOffsetMinutes: new Date().getTimezoneOffset(),
+        }),
+    });
+}
+
 /**
  * Syncs this device's reminder-time preference to the server. Bills
  * themselves live in the `bills` table and the cron reads them directly, so
  * this only needs to carry timing — not the bill list.
+ *
+ * Returns whether the save actually landed — the server 404s if the
+ * subscription's endpoint doesn't match any row (e.g. the browser silently
+ * rotated its push subscription), in which case a fetch that "succeeds" at
+ * the network level still didn't persist anything. On a 404 this re-registers
+ * the subscription server-side once and retries before giving up.
  */
-export async function savePushPrefs(): Promise<void> {
+export async function savePushPrefs(): Promise<boolean> {
     const sub = await getExistingSubscription();
-    if (!sub) return; // not subscribed to push, nothing to sync
+    if (!sub) return false; // not subscribed to push, nothing to sync
 
     try {
-        await fetch('/api/push/prefs', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                endpoint: sub.endpoint,
-                notifyTime: getSavedNotifyTime(),
-                utcOffsetMinutes: new Date().getTimezoneOffset(),
-            }),
-        });
+        let res = await postPrefs(sub.endpoint);
+        if (res.status === 404) {
+            const resubscribed = await subscribeToPush();
+            if (resubscribed) res = await postPrefs(resubscribed.endpoint);
+        }
+        return res.ok;
     } catch (e) {
         console.error('Push prefs sync failed:', e);
+        return false;
     }
 }
 

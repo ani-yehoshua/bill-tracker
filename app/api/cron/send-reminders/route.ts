@@ -144,7 +144,6 @@ export async function GET(req: NextRequest) {
     let failed = 0;
     let skipped = 0;
     const expiredEndpoints: string[] = [];
-    const sentEndpoints: string[] = [];
 
     for (const sub of subscriptions) {
         const notifyTime = sub.notify_time ?? '09:00';
@@ -164,6 +163,38 @@ export async function GET(req: NextRequest) {
             bill => !paidSet.has(`${householdId}:${monthKey}:${bill.id}`),
         );
         if (billsDue.length === 0) continue;
+
+        // Claim today's send slot BEFORE delivering anything. Writing
+        // last_sent_local_date afterwards (and not checking its error, as
+        // this used to) means a failed write leaves no record that we
+        // already reminded — and since shouldSendNow is a `>=` window, every
+        // later cron run this UTC day resends. Claiming first inverts the
+        // failure mode: a write we can't perform means we skip this run
+        // rather than risk an unbounded resend loop, and the conditional
+        // filter makes the claim atomic against overlapping runs.
+        const localToday = localDateString(utcOffsetMinutes);
+        const { data: claimed, error: claimError } = await supabase
+            .from('push_subscriptions')
+            .update({ last_sent_local_date: localToday })
+            .eq('endpoint', sub.endpoint)
+            .or(
+                `last_sent_local_date.is.null,last_sent_local_date.neq.${localToday}`,
+            )
+            .select('endpoint');
+
+        if (claimError) {
+            console.error(
+                'Could not claim reminder slot, skipping send:',
+                claimError,
+            );
+            failed++;
+            continue;
+        }
+        if (!claimed || claimed.length === 0) {
+            // Another concurrent run already claimed today for this device.
+            skipped++;
+            continue;
+        }
 
         const pushSubscription = {
             endpoint: sub.endpoint,
@@ -188,9 +219,6 @@ export async function GET(req: NextRequest) {
             try {
                 await webpush.sendNotification(pushSubscription, payload);
                 sent++;
-                if (!sentEndpoints.includes(sub.endpoint)) {
-                    sentEndpoints.push(sub.endpoint);
-                }
             } catch (err: unknown) {
                 if (
                     err &&
@@ -205,16 +233,6 @@ export async function GET(req: NextRequest) {
                 }
             }
         }
-    }
-
-    // Mark today's (device-local) date on subscriptions that successfully sent.
-    for (const endpoint of sentEndpoints) {
-        const sub = subscriptions.find(s => s.endpoint === endpoint);
-        if (!sub) continue;
-        await supabase
-            .from('push_subscriptions')
-            .update({ last_sent_local_date: localDateString(sub.utc_offset_minutes ?? 0) })
-            .eq('endpoint', endpoint);
     }
 
     // Remove expired subscriptions
