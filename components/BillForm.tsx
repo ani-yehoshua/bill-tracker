@@ -7,14 +7,34 @@ import {
     NOTIFY_OPTIONS,
     RECURRENCE_OPTIONS,
     MONTH_NAMES,
+    getMonthKey,
+    nextMonthKey,
 } from "@/lib/types";
 import { generateUuid } from "@/lib/uuid";
 
 interface BillFormProps {
     initial?: Bill | null;
-    onSave: (bill: Bill) => void;
+    onSave: (bill: Bill, markPaid?: boolean) => void;
     onClose: () => void;
     currentMonthKey: string;
+}
+
+/**
+ * True when the bill's due date, within the currently-viewed month, has
+ * already passed relative to real today — computed directly from the due
+ * day already entered, never asked as a separate question. Only meaningful
+ * when adding to the real current month; a "past due date" in a month
+ * you've navigated to (past or future) doesn't mean the same thing.
+ */
+function isDuePastThisMonth(bill: Bill, currentMonthKey: string): boolean {
+    const now = new Date();
+    if (currentMonthKey !== getMonthKey(now.getFullYear(), now.getMonth()))
+        return false;
+
+    const today = now.getDate();
+    if (bill.recurrence === "yearly")
+        return bill.dueMonth === now.getMonth() && bill.dueDay < today;
+    return bill.dueDay < today;
 }
 
 export default function BillForm({
@@ -42,6 +62,12 @@ export default function BillForm({
     );
     const [notes, setNotes] = React.useState(initial?.notes ?? "");
     const [errors, setErrors] = React.useState<Record<string, string>>({});
+
+    // Only used when adding a brand-new bill (not editing): a short
+    // follow-up step that decides whether this month's bill should start
+    // out marked paid.
+    const [step, setStep] = React.useState<"form" | "kind" | "paid">("form");
+    const [pendingBill, setPendingBill] = React.useState<Bill | null>(null);
 
     const validate = () => {
         const e: Record<string, string> = {};
@@ -71,8 +97,42 @@ export default function BillForm({
             notes: notes.trim() || undefined,
             monthKey: recurrence === "once" ? currentMonthKey : undefined,
         };
-        onSave(bill);
+
+        if (initial) {
+            // Editing an existing entry — paid status is untouched here,
+            // it's managed from the bill list itself.
+            onSave(bill);
+            onClose();
+            return;
+        }
+
+        setPendingBill(bill);
+        setStep("kind");
+    };
+
+    const finishAdd = (markPaid: boolean) => {
+        if (!pendingBill) return;
+        onSave(pendingBill, markPaid);
         onClose();
+    };
+
+    const handleNewBill = () => {
+        if (!pendingBill) return;
+        if (isDuePastThisMonth(pendingBill, currentMonthKey)) {
+            // This cycle's due date already passed before the bill even
+            // existed for us — nothing owed this month, so there's nothing
+            // to ask. Save it hidden until the cycle that's actually ours.
+            onSave(
+                {
+                    ...pendingBill,
+                    startsMonthKey: nextMonthKey(currentMonthKey),
+                },
+                false,
+            );
+            onClose();
+            return;
+        }
+        setStep("paid");
     };
 
     return (
@@ -110,6 +170,8 @@ export default function BillForm({
                     }}
                 />
 
+                {step === "form" && (
+                <>
                 <div
                     style={{
                         fontFamily: "var(--font-dm-serif)",
@@ -403,10 +465,145 @@ export default function BillForm({
                     }}>
                     {initial ? "Save Changes" : "Add Bill"}
                 </button>
+                </>
+                )}
+
+                {step === "kind" && (
+                    <>
+                        <div
+                            style={{
+                                fontFamily: "var(--font-dm-serif)",
+                                fontSize: 22,
+                                color: "var(--accent)",
+                                marginBottom: 8,
+                            }}>
+                            One more thing
+                        </div>
+                        <p
+                            style={{
+                                fontSize: 13,
+                                color: "var(--muted)",
+                                marginBottom: 20,
+                            }}>
+                            Is this a bill you&apos;re already paying, or a
+                            brand new one?
+                        </p>
+                        <div
+                            style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: 12,
+                                marginBottom: 12,
+                            }}>
+                            <button
+                                onClick={() => finishAdd(true)}
+                                style={wizardBtnStyle}>
+                                🔁 Already paying this
+                                <span style={wizardBtnSubStyle}>
+                                    Mark this month paid
+                                </span>
+                            </button>
+                            <button
+                                onClick={handleNewBill}
+                                style={wizardBtnStyle}>
+                                🆕 New bill
+                                <span style={wizardBtnSubStyle}>
+                                    I just signed up for this
+                                </span>
+                            </button>
+                        </div>
+                        <button
+                            onClick={() => setStep("form")}
+                            style={backBtnStyle}>
+                            Back
+                        </button>
+                    </>
+                )}
+
+                {step === "paid" && (
+                    <>
+                        <div
+                            style={{
+                                fontFamily: "var(--font-dm-serif)",
+                                fontSize: 22,
+                                color: "var(--accent)",
+                                marginBottom: 8,
+                            }}>
+                            Have you paid it yet?
+                        </div>
+                        <p
+                            style={{
+                                fontSize: 13,
+                                color: "var(--muted)",
+                                marginBottom: 20,
+                            }}>
+                            For this month&apos;s bill, specifically.
+                        </p>
+                        <div
+                            style={{
+                                display: "grid",
+                                gridTemplateColumns: "1fr 1fr",
+                                gap: 12,
+                                marginBottom: 12,
+                            }}>
+                            <button
+                                onClick={() => finishAdd(true)}
+                                style={wizardBtnStyle}>
+                                ✓ Yes
+                            </button>
+                            <button
+                                onClick={() => finishAdd(false)}
+                                style={wizardBtnStyle}>
+                                Not yet
+                            </button>
+                        </div>
+                        <button
+                            onClick={() => setStep("kind")}
+                            style={backBtnStyle}>
+                            Back
+                        </button>
+                    </>
+                )}
             </div>
         </div>
     );
 }
+
+const wizardBtnStyle: React.CSSProperties = {
+    width: "100%",
+    background: "var(--surface2)",
+    border: "1px solid var(--border)",
+    borderRadius: 14,
+    padding: 16,
+    fontSize: 15,
+    fontWeight: 600,
+    color: "var(--text)",
+    fontFamily: "var(--font-dm-sans)",
+    cursor: "pointer",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 4,
+    textAlign: "center",
+};
+
+const wizardBtnSubStyle: React.CSSProperties = {
+    fontSize: 11,
+    fontWeight: 400,
+    color: "var(--muted)",
+};
+
+const backBtnStyle: React.CSSProperties = {
+    width: "100%",
+    background: "transparent",
+    color: "var(--muted)",
+    border: "1px solid var(--border)",
+    borderRadius: 14,
+    padding: 14,
+    fontSize: 14,
+    fontFamily: "var(--font-dm-sans)",
+    cursor: "pointer",
+};
 
 const labelStyle: React.CSSProperties = {
     display: "block",

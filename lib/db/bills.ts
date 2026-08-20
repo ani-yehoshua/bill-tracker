@@ -17,6 +17,7 @@ export function rowToBill(row: BillRow): Bill {
         notes: row.notes ?? undefined,
         notifyDaysBefore: row.notify_days_before,
         color: row.color ?? undefined,
+        startsMonthKey: row.starts_month_key ?? undefined,
     };
 }
 
@@ -37,6 +38,7 @@ export function billToRow(
         notes: bill.notes ?? null,
         notify_days_before: bill.notifyDaysBefore,
         color: bill.color ?? null,
+        starts_month_key: bill.startsMonthKey ?? null,
     };
 }
 
@@ -79,6 +81,8 @@ export async function updateBillRow(
     if (updates.notifyDaysBefore !== undefined)
         patch.notify_days_before = updates.notifyDaysBefore;
     if (updates.color !== undefined) patch.color = updates.color ?? null;
+    if (updates.startsMonthKey !== undefined)
+        patch.starts_month_key = updates.startsMonthKey ?? null;
 
     const { error } = await supabase
         .from('bills')

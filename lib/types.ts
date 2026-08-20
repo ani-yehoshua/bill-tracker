@@ -20,6 +20,10 @@ export interface Bill {
     notes?: string;
     notifyDaysBefore: number;
     color?: string;
+    // "YYYY-M": first month this bill should appear in. Set when a new bill
+    // is added mid-cycle after its due date already passed — that cycle was
+    // never really owed, so it's hidden until the one that actually is.
+    startsMonthKey?: string;
 }
 
 export interface PaidRecord {
@@ -86,6 +90,23 @@ export function getMonthKey(year: number, month: number) {
     return `${year}-${month}`;
 }
 
+/** Next calendar month's key, in the same "YYYY-M" (0-indexed) format. */
+export function nextMonthKey(monthKey: string): string {
+    const [year, month] = monthKey.split('-').map(Number);
+    return month === 11 ? getMonthKey(year + 1, 0) : getMonthKey(year, month + 1);
+}
+
+/**
+ * Chronological comparison of two "YYYY-M" keys — negative if `a` is
+ * earlier, positive if later, 0 if equal. Never compare month_key strings
+ * lexically: "2026-10" < "2026-7" as plain strings despite being later.
+ */
+function monthKeyCompare(a: string, b: string): number {
+    const [ay, am] = a.split('-').map(Number);
+    const [by, bm] = b.split('-').map(Number);
+    return ay * 12 + am - (by * 12 + bm);
+}
+
 export function getCategoryInfo(id: Category) {
     return CATEGORIES.find(c => c.id === id) ?? CATEGORIES[5];
 }
@@ -106,7 +127,10 @@ export function ordinal(n: number) {
 
 /** Returns true if a bill should appear in the given monthKey */
 export function billVisibleInMonth(bill: Bill, monthKey: string): boolean {
-    const [year, month] = monthKey.split('-').map(Number);
+    if (bill.startsMonthKey && monthKeyCompare(monthKey, bill.startsMonthKey) < 0)
+        return false;
+
+    const [, month] = monthKey.split('-').map(Number);
     if (bill.recurrence === 'monthly') return true;
     if (bill.recurrence === 'once') return bill.monthKey === monthKey;
     // yearly: visible when the calendar month matches the bill's dueMonth

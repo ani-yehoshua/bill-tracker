@@ -260,13 +260,16 @@ export default function BillsApp({ userId, householdId }: BillsAppProps) {
         }
     };
 
-    const handleSave = async (bill: Bill) => {
+    const handleSave = async (bill: Bill, markPaid?: boolean) => {
         try {
             if (editBill) {
                 await updateBill(bill.id, bill);
                 showToast("Bill updated! ✓");
             } else {
                 await addBill(bill);
+                // A freshly-added bill always starts out absent from
+                // bill_paid (unpaid), so toggling always lands on paid.
+                if (markPaid) await togglePaid(bill.id);
                 showToast("Bill added! ✓");
             }
         } catch {
