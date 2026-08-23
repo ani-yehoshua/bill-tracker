@@ -14,6 +14,7 @@ import {
     formatTime12h,
     DEFAULT_NOTIFY_TIME,
 } from "@/lib/notifications";
+import BottomSheet from "@/components/BottomSheet";
 
 // All 24 hours as selectable options
 const HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) => {
@@ -129,40 +130,7 @@ export default function NotificationPanel({
               : "Service worker not registered";
 
     return (
-        <div
-            style={{
-                position: "fixed",
-                inset: 0,
-                background: "rgba(0,0,0,0.75)",
-                zIndex: 200,
-                display: "flex",
-                alignItems: "flex-end",
-                backdropFilter: "blur(4px)",
-            }}
-            onClick={e => e.target === e.currentTarget && onClose()}>
-            <div
-                style={{
-                    background: "var(--surface)",
-                    border: "1px solid var(--border)",
-                    borderRadius: "24px 24px 0 0",
-                    padding:
-                        "28px 20px calc(28px + env(safe-area-inset-bottom, 0px))",
-                    width: "100%",
-                    maxHeight: "92dvh",
-                    overflowY: "auto",
-                }}>
-                {/* Handle */}
-                <div
-                    style={{
-                        width: 36,
-                        height: 4,
-                        background: "var(--muted)",
-                        borderRadius: 2,
-                        margin: "0 auto 20px",
-                        opacity: 0.4,
-                    }}
-                />
-
+        <BottomSheet onClose={onClose}>
                 <div
                     style={{
                         fontFamily: "var(--font-dm-serif)",
@@ -468,7 +436,6 @@ export default function NotificationPanel({
                     }}>
                     Close
                 </button>
-            </div>
-        </div>
+        </BottomSheet>
     );
 }

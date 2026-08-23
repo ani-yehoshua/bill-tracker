@@ -4,6 +4,7 @@ import * as React from 'react';
 import { useHousehold } from '@/hooks/useHousehold';
 import { updateProfile } from '@/lib/db/profile';
 import { AVATAR_EMOJI_PRESETS } from '@/lib/types';
+import BottomSheet from '@/components/BottomSheet';
 
 interface HouseholdPanelProps {
     userId: string;
@@ -141,39 +142,7 @@ export default function HouseholdPanel({
     const codeActive = !!inviteCode && !codeExpired;
 
     return (
-        <div
-            style={{
-                position: 'fixed',
-                inset: 0,
-                background: 'rgba(0,0,0,0.75)',
-                zIndex: 200,
-                display: 'flex',
-                alignItems: 'flex-end',
-                backdropFilter: 'blur(4px)',
-            }}
-            onClick={e => e.target === e.currentTarget && onClose()}>
-            <div
-                style={{
-                    background: 'var(--surface)',
-                    border: '1px solid var(--border)',
-                    borderRadius: '24px 24px 0 0',
-                    padding:
-                        '28px 20px calc(28px + env(safe-area-inset-bottom, 0px))',
-                    width: '100%',
-                    maxHeight: '92dvh',
-                    overflowY: 'auto',
-                }}>
-                <div
-                    style={{
-                        width: 36,
-                        height: 4,
-                        background: 'var(--muted)',
-                        borderRadius: 2,
-                        margin: '0 auto 20px',
-                        opacity: 0.4,
-                    }}
-                />
-
+        <BottomSheet onClose={onClose}>
                 <div
                     style={{
                         fontFamily: 'var(--font-dm-serif)',
@@ -458,8 +427,7 @@ export default function HouseholdPanel({
                     }}>
                     Close
                 </button>
-            </div>
-        </div>
+        </BottomSheet>
     );
 }
 
