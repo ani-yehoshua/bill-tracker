@@ -4,6 +4,8 @@ A shared bill tracker for households. Track recurring and one-time bills,
 get push reminders before they're due, and manage a monthly budget
 together — built as an installable PWA.
 
+**Live:** https://bill-tracker-sigma.vercel.app
+
 ## Features
 
 - **Shared households** — sign in with an emailed one-time code (no

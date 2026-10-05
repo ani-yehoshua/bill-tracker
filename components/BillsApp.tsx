@@ -6,6 +6,7 @@ import { useBudgetRings } from "@/hooks/useBudgetRings";
 import { useExpenses } from "@/hooks/useExpenses";
 import { usePaychecks } from "@/hooks/usePaychecks";
 import BillCard from "@/components/BillCard";
+import BillDayGroup from "@/components/BillDayGroup";
 import BillForm from "@/components/BillForm";
 import NotificationPanel from "@/components/NotificationPanel";
 import HouseholdPanel from "@/components/HouseholdPanel";
@@ -153,6 +154,28 @@ export default function BillsApp({ userId, householdId }: BillsAppProps) {
             return a.name.localeCompare(b.name);
         });
     }, [bills, monthKey, filterCat, sortBy]);
+
+    // Bills sharing a due day collapse into one group — only meaningful when
+    // sorted by due date, since that's the only order where a day's bills
+    // are adjacent. Other sorts render the flat list.
+    const [expandedDays, setExpandedDays] = useState<Set<number>>(new Set());
+    const toggleDay = (day: number) =>
+        setExpandedDays(prev => {
+            const next = new Set(prev);
+            if (next.has(day)) next.delete(day);
+            else next.add(day);
+            return next;
+        });
+    const billGroups = useMemo(() => {
+        if (sortBy !== "due") return null;
+        const groups: { dueDay: number; bills: Bill[] }[] = [];
+        for (const bill of visibleBills) {
+            const last = groups[groups.length - 1];
+            if (last && last.dueDay === bill.dueDay) last.bills.push(bill);
+            else groups.push({ dueDay: bill.dueDay, bills: [bill] });
+        }
+        return groups;
+    }, [visibleBills, sortBy]);
 
     // Summary
     const { total, paidTotal, remaining } = useMemo(() => {
@@ -745,27 +768,46 @@ export default function BillsApp({ userId, householdId }: BillsAppProps) {
                             flexDirection: "column",
                             gap: 10,
                         }}>
-                        {visibleBills.map(bill => (
-                            <BillCard
-                                key={bill.id}
-                                bill={bill}
-                                monthKey={monthKey}
-                                paid={!!paid[bill.id]}
-                                onTogglePaid={id => {
-                                    togglePaid(id);
-                                    showToast(
-                                        paid[id]
-                                            ? "Marked unpaid"
-                                            : "Marked as paid! ✓",
-                                    );
-                                }}
-                                onEdit={handleEdit}
-                                onDelete={id => {
-                                    deleteBill(id);
-                                    showToast("Bill deleted");
-                                }}
-                            />
-                        ))}
+                        {(() => {
+                            const renderCard = (bill: Bill) => (
+                                <BillCard
+                                    key={bill.id}
+                                    bill={bill}
+                                    monthKey={monthKey}
+                                    paid={!!paid[bill.id]}
+                                    onTogglePaid={id => {
+                                        togglePaid(id);
+                                        showToast(
+                                            paid[id]
+                                                ? "Marked unpaid"
+                                                : "Marked as paid! ✓",
+                                        );
+                                    }}
+                                    onEdit={handleEdit}
+                                    onDelete={id => {
+                                        deleteBill(id);
+                                        showToast("Bill deleted");
+                                    }}
+                                />
+                            );
+                            if (!billGroups) return visibleBills.map(renderCard);
+                            return billGroups.map(group =>
+                                group.bills.length === 1 ? (
+                                    renderCard(group.bills[0])
+                                ) : (
+                                    <BillDayGroup
+                                        key={`day-${group.dueDay}`}
+                                        dueDay={group.dueDay}
+                                        bills={group.bills}
+                                        monthKey={monthKey}
+                                        paid={paid}
+                                        expanded={expandedDays.has(group.dueDay)}
+                                        onToggle={() => toggleDay(group.dueDay)}>
+                                        {group.bills.map(renderCard)}
+                                    </BillDayGroup>
+                                ),
+                            );
+                        })()}
                     </div>
                 )}
 

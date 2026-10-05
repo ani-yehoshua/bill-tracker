@@ -247,6 +247,24 @@ export default function AuthScreen() {
                                 ? `Resend code in ${cooldown}s`
                                 : 'Resend code'}
                         </button>
+                        <button
+                            onClick={() => {
+                                setStep('email');
+                                setDigits(Array(6).fill(''));
+                                setError('');
+                            }}
+                            style={{
+                                display: 'block',
+                                margin: '12px auto 0',
+                                background: 'transparent',
+                                border: 'none',
+                                color: 'var(--muted)',
+                                fontSize: 12,
+                                fontFamily: 'var(--font-dm-sans)',
+                                cursor: 'pointer',
+                            }}>
+                            ← Use a different email
+                        </button>
                     </>
                 )}
 
